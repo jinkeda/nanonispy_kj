@@ -1,0 +1,26 @@
+# Ignore everything by default
+*
+
+# Allow project files
+!.gitignore
+!README.md
+!pyproject.toml
+!LICENSE
+
+# Allow nanonispy2 package
+!nanonispy2/
+!nanonispy2/**
+
+# Allow tests
+!tests/
+!tests/**
+
+# Exclude Python artifacts everywhere
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+*.egg
