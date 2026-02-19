@@ -5,11 +5,10 @@ Implements the Grid class for reading and writing Nanonis grid
 spectroscopy files, using the modular core/io/parsers infrastructure.
 """
 
-import os
 import re
 import warnings
-
-import os
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import numpy as np
 
@@ -47,10 +46,10 @@ def _resolve_topo_index(param_labels):
         if base in _TOPO_BASE_ALIASES:
             return i
     warnings.warn(
-        f"Z column not found in {param_labels}, falling back to index 4",
+        f"Z column not found in {param_labels}, falling back to first parameter (index 0)",
         stacklevel=2
     )
-    return 4
+    return 0
 
 
 class Grid(NanonisFile):
@@ -102,14 +101,14 @@ class Grid(NanonisFile):
     UnhandledFileError
         If fname does not have a '.3ds' extension.
     """
+    expected_filetype = 'grid'
 
-    def __init__(self, fname, header_override=None, data_format=None):
-        # Validate extension before base class tries to find headers
-        _, ext = os.path.splitext(fname)
-        if ext.lower() != '.3ds':
-            raise UnhandledFileError(
-                f"{os.path.basename(fname)} is not a .3ds grid file"
-            )
+    def __init__(
+        self,
+        fname: str,
+        header_override: Optional[Dict[str, Any]] = None,
+        data_format: Optional[str] = None
+    ) -> None:
         super().__init__(fname)
         self.data_format = get_dtype(data_format)
         self.header = parse_grid_header(self.header_raw, header_override=header_override)
@@ -138,10 +137,24 @@ class Grid(NanonisFile):
             f.seek(self.byte_offset)
             griddata = np.fromfile(f, dtype=self.data_format)
 
-        # pixel size in bytes
+        # pixel size in elements
         exp_size_per_pix = num_param + num_sweep * num_chan
+        expected_total = ny * nx * exp_size_per_pix
 
-        # resize from 1d to 3d (silently zero-fills if truncated)
+        if griddata.size == 0:
+            from ..core.exceptions import CorruptedDataError
+            raise CorruptedDataError(
+                f"No binary data found after header in {self.basename}"
+            )
+        if griddata.size < expected_total:
+            warnings.warn(
+                f"{self.basename}: expected {expected_total} data points but "
+                f"found {griddata.size}. File may be truncated; missing values "
+                "will be zero-filled.",
+                stacklevel=2
+            )
+
+        # resize from 1d to 3d (zero-fills if truncated)
         griddata.resize((ny, nx, exp_size_per_pix))
 
         # experimental parameters are first num_param of every pixel
@@ -217,7 +230,7 @@ class Grid(NanonisFile):
         """
         if not str(fname).endswith('.3ds'):
             raise UnhandledFileError(f"{fname} must have .3ds extension")
-        if not overwrite and os.path.exists(fname):
+        if not overwrite and Path(fname).exists():
             raise FileExistsError(
                 f"{fname} already exists. Set overwrite=True to replace it."
             )
@@ -239,6 +252,10 @@ class Grid(NanonisFile):
 
         dtype = self._resolve_grid_dtype(data_format)
         signals_to_write = self.signals if signals is None else signals
+
+        # Validate header text matches actual data
+        self._validate_header_data_consistency(header_bytes, signals_to_write)
+
         griddata = self._stack_signals_for_write(signals_to_write, dtype)
 
         with open(fname, 'wb') as fh:
@@ -252,7 +269,7 @@ class Grid(NanonisFile):
         elif isinstance(data_format, str):
             try:
                 return np.dtype(get_dtype(data_format))
-            except Exception:
+            except KeyError:
                 return np.dtype(data_format)
         return np.dtype(data_format)
 
@@ -293,6 +310,88 @@ class Grid(NanonisFile):
             griddata[:, :, start:stop] = channel_data.astype(dtype, copy=False)
 
         return griddata
+
+    def _validate_header_data_consistency(
+        self,
+        header_bytes: bytes,
+        signals: dict
+    ) -> None:
+        """
+        Check that the header text parameters match the actual signal data.
+
+        Re-parses the header text and compares grid dimensions, parameter
+        counts, sweep length, channel count, and channel names against
+        the signal arrays. Raises ValueError on any mismatch.
+        """
+        from .header import parse_grid_header
+
+        # Re-parse the header that will be written
+        header_text = header_bytes.decode('utf-8', errors='replace')
+        try:
+            written_header = parse_grid_header(header_text)
+        except Exception:
+            # If header can't be parsed, skip validation
+            # (user may be writing a custom header)
+            return
+
+        errors = []
+
+        # --- Grid dimensions ---
+        hdr_nx, hdr_ny = written_header['dim_px']
+        if 'params' in signals:
+            data_ny, data_nx = signals['params'].shape[:2]
+            if (int(hdr_nx), int(hdr_ny)) != (data_nx, data_ny):
+                errors.append(
+                    f"Header dim_px ({hdr_nx}×{hdr_ny}) != "
+                    f"data shape ({data_nx}×{data_ny})"
+                )
+
+        # --- Number of parameters ---
+        hdr_num_param = int(written_header['num_parameters'])
+        if 'params' in signals and signals['params'].ndim == 3:
+            data_num_param = signals['params'].shape[2]
+            if hdr_num_param != data_num_param:
+                errors.append(
+                    f"Header num_parameters ({hdr_num_param}) != "
+                    f"params array depth ({data_num_param})"
+                )
+
+        # --- Sweep length ---
+        hdr_num_sweep = int(written_header['num_sweep_signal'])
+        hdr_channels = list(written_header['channels'])
+        for ch in hdr_channels:
+            if ch in signals:
+                data_sweep = signals[ch].shape[-1]
+                if hdr_num_sweep != data_sweep:
+                    errors.append(
+                        f"Header num_sweep_signal ({hdr_num_sweep}) != "
+                        f"channel '{ch}' sweep length ({data_sweep})"
+                    )
+                break  # check only the first matching channel
+
+        # --- Channel count ---
+        hdr_num_chan = int(written_header['num_channels'])
+        data_channels = [k for k in signals if k not in
+                         ('params', 'sweep_signal', 'topo')]
+        if hdr_num_chan != len(data_channels):
+            errors.append(
+                f"Header num_channels ({hdr_num_chan}) != "
+                f"data channels ({len(data_channels)}): {data_channels}"
+            )
+
+        # --- Channel names ---
+        missing = [ch for ch in hdr_channels if ch not in signals]
+        if missing:
+            errors.append(
+                f"Header lists channels not found in signals: {missing}"
+            )
+
+        if errors:
+            raise ValueError(
+                "Header/data mismatch — the header text does not match "
+                "the signal arrays. Fix the header or signals before writing.\n"
+                + "\n".join(f"  • {e}" for e in errors)
+            )
 
 
 __all__ = ['Grid']

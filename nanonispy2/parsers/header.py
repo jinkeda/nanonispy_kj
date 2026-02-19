@@ -13,7 +13,6 @@ from ..core.exceptions import (
     MissingHeaderEntryError,
     InvalidHeaderValueError,
 )
-from ..core.validators import validate_header_entries
 
 
 def split_header_entry(entry: str) -> Tuple[str, Any]:
@@ -310,92 +309,3 @@ def parse_spec_header(header_raw: str) -> Dict[str, str]:
 
     return header_dict
 
-
-def extract_channel_info(header: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract channel information from a parsed header.
-
-    Parameters
-    ----------
-    header : dict
-        Parsed header dictionary.
-
-    Returns
-    -------
-    dict
-        Dictionary containing channel information.
-    """
-    channel_info = {}
-
-    if 'channels' in header:
-        channel_info['names'] = header['channels']
-        channel_info['count'] = header.get('num_channels', len(header['channels']))
-
-    if 'data_info' in header and 'Name' in header['data_info']:
-        channel_info['names'] = list(header['data_info']['Name'])
-        channel_info['count'] = len(channel_info['names'])
-
-        if 'Unit' in header['data_info']:
-            channel_info['units'] = list(header['data_info']['Unit'])
-
-        if 'Calibration' in header['data_info']:
-            channel_info['calibrations'] = list(header['data_info']['Calibration'])
-
-    return channel_info
-
-
-def validate_grid_header(header: Dict[str, Any]) -> bool:
-    """
-    Validate that a grid header contains all required entries.
-
-    Parameters
-    ----------
-    header : dict
-        Parsed grid header.
-
-    Returns
-    -------
-    bool
-        True if header is valid.
-
-    Raises
-    ------
-    MissingHeaderEntryError
-        If required entries are missing.
-    """
-    required_keys = [
-        'dim_px',
-        'num_parameters',
-        'num_sweep_signal',
-        'channels',
-        'num_channels',
-    ]
-
-    return validate_header_entries(header, required_keys)
-
-
-def validate_scan_header(header: Dict[str, Any]) -> bool:
-    """
-    Validate that a scan header contains all required entries.
-
-    Parameters
-    ----------
-    header : dict
-        Parsed scan header.
-
-    Returns
-    -------
-    bool
-        True if header is valid.
-
-    Raises
-    ------
-    MissingHeaderEntryError
-        If required entries are missing.
-    """
-    required_keys = [
-        'scan_pixels',
-        'data_info',
-    ]
-
-    return validate_header_entries(header, required_keys)

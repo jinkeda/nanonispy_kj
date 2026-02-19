@@ -41,16 +41,6 @@ class InvalidDataFormatError(NanonisError):
     pass
 
 
-class ValidationError(NanonisError):
-    """
-    Raised when data validation fails.
-
-    This exception is raised when input data does not meet expected
-    constraints or requirements.
-    """
-    pass
-
-
 class CorruptedDataError(NanonisError):
     """
     Raised when data appears to be corrupted.
@@ -81,12 +71,12 @@ class InvalidHeaderValueError(NanonisError):
     pass
 
 
-class IncompleteScanError(NanonisError):
+class ValidationError(NanonisError):
     """
-    Raised when attempting to load an incomplete scan.
+    Raised when data validation fails.
 
-    This exception is raised when a scan file does not contain the expected
-    amount of data, indicating the scan was not completed.
+    This exception is raised when input data does not meet expected
+    constraints or requirements.
     """
     pass
 

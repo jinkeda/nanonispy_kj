@@ -6,6 +6,7 @@ Nanonis files with proper error handling and validation.
 """
 
 from typing import Optional, Tuple
+import warnings
 
 import numpy as np
 
@@ -18,6 +19,10 @@ class BinaryReader:
     """
     Binary data reader for Nanonis files.
 
+    .. deprecated::
+        ``BinaryReader`` will be removed in a future version.
+        Use ``numpy.fromfile()`` directly instead.
+
     Provides methods for reading binary data from files with specified
     formats and proper error handling.
 
@@ -29,15 +34,6 @@ class BinaryReader:
         Position in file where data begins (after header).
     data_format : str, optional
         Name of the data format. If None, uses default format.
-
-    Attributes
-    ----------
-    file_path : str
-        Absolute path to the file.
-    byte_offset : int
-        Byte position where data begins.
-    dtype : str
-        NumPy dtype string for reading data.
     """
 
     def __init__(
@@ -58,6 +54,12 @@ class BinaryReader:
         data_format : str, optional
             Name of the data format.
         """
+        warnings.warn(
+            "BinaryReader is deprecated and will be removed in a future version. "
+            "Use numpy.fromfile() directly instead.",
+            FutureWarning,
+            stacklevel=2
+        )
         self.file_path = validate_file_path(file_path)
         self.byte_offset = byte_offset
         self.dtype = get_dtype(data_format)

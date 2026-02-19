@@ -5,12 +5,12 @@ Implements the Scan class for reading Nanonis scan files, using the
 modular core/io/parsers infrastructure.
 """
 
-import os
+from typing import Optional
 
 import numpy as np
 
 from ..core.base import NanonisFile
-from ..core.exceptions import UnhandledFileError
+from ..core.exceptions import CorruptedDataError
 from ..io.formats import get_dtype
 from .header import parse_scan_header
 
@@ -54,14 +54,9 @@ class Scan(NanonisFile):
     UnhandledFileError
         If fname does not have a '.sxm' extension.
     """
+    expected_filetype = 'scan'
 
-    def __init__(self, fname, data_format=None):
-        # Validate extension before base class tries to find headers
-        _, ext = os.path.splitext(fname)
-        if ext.lower() != '.sxm':
-            raise UnhandledFileError(
-                f"{os.path.basename(fname)} is not a .sxm scan file"
-            )
+    def __init__(self, fname: str, data_format: Optional[str] = None) -> None:
         super().__init__(fname)
         self.data_format = get_dtype(data_format)
         self.header = parse_scan_header(self.header_raw)
@@ -85,8 +80,16 @@ class Scan(NanonisFile):
         nchanns = len(channs)
         nx, ny = self.header['scan_pixels']
 
-        # assume both directions for now
-        ndir = 2
+        # Determine number of scan directions from header
+        # The 'Direction' field in data_info contains per-channel values
+        # like 'both' (= forward + backward) or 'forward'/'backward'
+        data_info = self.header.get('data_info', {})
+        if 'Direction' in data_info:
+            directions = data_info['Direction']
+            # If any channel records 'both', there are 2 directions
+            ndir = 2 if any(d.strip().lower() == 'both' for d in directions) else 1
+        else:
+            ndir = 2  # default: forward + backward
 
         data_dict = dict()
 
@@ -96,6 +99,13 @@ class Scan(NanonisFile):
             scandata = np.fromfile(f, dtype=self.data_format)
 
         # reshape
+        expected_size = nchanns * ndir * ny * nx
+        if scandata.size != expected_size:
+            raise CorruptedDataError(
+                f"{self.basename}: expected {expected_size} data points "
+                f"({nchanns} channels × {ndir} directions × {ny} × {nx} pixels) "
+                f"but found {scandata.size}. File may be truncated or corrupted."
+            )
         scandata_shaped = scandata.reshape(nchanns, ndir, ny, nx)
 
         # extract data for each channel

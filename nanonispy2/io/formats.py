@@ -2,7 +2,7 @@
 Data format definitions for nanonispy2.
 
 This module defines supported data formats and provides utilities for
-format validation and conversion.
+format lookup and dtype resolution.
 """
 
 from dataclasses import dataclass
@@ -11,7 +11,6 @@ from typing import Dict, Optional
 import numpy as np
 
 from ..core.exceptions import InvalidDataFormatError
-from ..core.validators import validate_data_format
 
 
 @dataclass
@@ -148,107 +147,3 @@ def get_dtype(format_name: Optional[str] = None) -> str:
         NumPy dtype string.
     """
     return get_format(format_name).dtype
-
-
-def register_custom_format(
-    name: str,
-    dtype: str,
-    description: str,
-    byte_size: int
-) -> DataFormat:
-    """
-    Register a custom data format.
-
-    Parameters
-    ----------
-    name : str
-        Name for the custom format.
-    dtype : str
-        NumPy dtype string.
-    description : str
-        Description of the format.
-    byte_size : int
-        Number of bytes per value.
-
-    Returns
-    -------
-    DataFormat
-        The registered data format object.
-
-    Raises
-    ------
-    InvalidDataFormatError
-        If dtype is invalid or name already exists.
-    """
-    if name in FORMAT_REGISTRY:
-        raise InvalidDataFormatError(
-            f"Format name '{name}' is already registered. "
-            "Choose a different name or unregister the existing format first."
-        )
-
-    # Validate dtype
-    validate_data_format(dtype)
-
-    # Create and register format
-    custom_format = DataFormat(
-        name=name,
-        dtype=dtype,
-        description=description,
-        byte_size=byte_size
-    )
-
-    FORMAT_REGISTRY[name] = custom_format
-
-    return custom_format
-
-
-def list_available_formats() -> Dict[str, str]:
-    """
-    List all available data formats.
-
-    Returns
-    -------
-    dict
-        Dictionary mapping format names to descriptions.
-    """
-    return {
-        name: fmt.description
-        for name, fmt in FORMAT_REGISTRY.items()
-    }
-
-
-def validate_format_compatibility(
-    format_name: str,
-    expected_byte_size: Optional[int] = None
-) -> bool:
-    """
-    Validate that a format is compatible with expected constraints.
-
-    Parameters
-    ----------
-    format_name : str
-        Name of the format to validate.
-    expected_byte_size : int, optional
-        Expected byte size per value.
-
-    Returns
-    -------
-    bool
-        True if format is compatible.
-
-    Raises
-    ------
-    InvalidDataFormatError
-        If format is not compatible.
-    """
-    fmt = get_format(format_name)
-
-    if expected_byte_size is not None:
-        if fmt.byte_size != expected_byte_size:
-            raise InvalidDataFormatError(
-                f"Format '{format_name}' has byte size {fmt.byte_size}, "
-                f"expected {expected_byte_size}"
-            )
-
-    return True
-

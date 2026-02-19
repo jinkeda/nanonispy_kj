@@ -14,8 +14,6 @@ from .exceptions import (
 )
 from .validators import (
     validate_file_path,
-    validate_dimensions,
-    validate_data_format,
     validate_header_entries,
 )
 
@@ -26,8 +24,5 @@ __all__ = [
     'InvalidDataFormatError',
     'ValidationError',
     'validate_file_path',
-    'validate_dimensions',
-    'validate_data_format',
     'validate_header_entries',
 ]
-

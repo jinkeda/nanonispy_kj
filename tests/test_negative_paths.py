@@ -166,9 +166,9 @@ class TestTopoResolver:
         assert _resolve_topo_index(params) == 2
 
     def test_fallback_with_warning(self):
-        """Should warn and return 4 when Z column not found."""
+        """Should warn and return 0 when Z column not found."""
         from nanonispy2.read import _resolve_topo_index
         params = ['A', 'B', 'C', 'D', 'E']
         with pytest.warns(UserWarning, match="Z column not found"):
             idx = _resolve_topo_index(params)
-        assert idx == 4
+        assert idx == 0

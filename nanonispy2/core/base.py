@@ -5,8 +5,8 @@ This module provides the base NanonisFile class that handles common operations
 for all Nanonis file types, including header detection and reading.
 """
 
-import os
 import warnings
+from pathlib import Path
 from typing import Optional
 
 from .exceptions import UnhandledFileError, FileHeaderNotFoundError
@@ -63,6 +63,9 @@ class NanonisFile:
         '.dat': 'spec'
     }
 
+    # Subclasses set this to enforce correct file type (e.g. 'grid', 'scan', 'spec')
+    expected_filetype = None
+
     def __init__(self, fname: str):
         """
         Initialize NanonisFile with file path and determine file type.
@@ -74,10 +77,20 @@ class NanonisFile:
         """
         # Validate and store file path
         self.fname = validate_file_path(fname)
-        self.datadir, self.basename = os.path.split(self.fname)
+        self._path = Path(self.fname)
+        self.datadir = str(self._path.parent)
+        self.basename = self._path.name
 
         # Determine file type from extension
         self.filetype = self._determine_filetype()
+
+        # Enforce expected filetype if subclass declares one
+        if (self.expected_filetype is not None
+                and self.filetype != self.expected_filetype):
+            raise UnhandledFileError(
+                f"{self.basename} is not a "
+                f".{dict(grid='3ds', scan='sxm', spec='dat')[self.expected_filetype]} file"
+            )
 
         # Find where data begins (after header)
         self.byte_offset = self._find_byte_offset()
@@ -99,7 +112,7 @@ class NanonisFile:
         UnhandledFileError
             If file extension is not supported.
         """
-        _, fname_ext = os.path.splitext(self.fname)
+        fname_ext = self._path.suffix
 
         if fname_ext not in self.SUPPORTED_EXTENSIONS:
             raise UnhandledFileError(
