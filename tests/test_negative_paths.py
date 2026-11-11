@@ -172,3 +172,44 @@ class TestTopoResolver:
         with pytest.warns(UserWarning, match="Z column not found"):
             idx = _resolve_topo_index(params)
         assert idx == 0
+
+
+class TestNotAvailableHeaderValues:
+    """Nanonis writes 'N/A' for some header values, e.g. ACQ_TIME in slice files."""
+
+    @staticmethod
+    def _with_value(scan_file, tmp_path, tag, old, new):
+        """Copy scan_file with one header value line replaced."""
+        raw = open(scan_file, 'rb').read()
+        target = f':{tag}:\n{old}\n'.encode()
+        assert target in raw
+        out = tmp_path / 'slice.sxm'
+        out.write_bytes(raw.replace(target, f':{tag}:\n{new}\n'.encode(), 1))
+        return str(out)
+
+    @pytest.mark.parametrize('value', ['N/A', '         N/A', 'n/a', ''])
+    def test_acq_time_not_available(self, scan_file, tmp_path, value):
+        path = self._with_value(scan_file, tmp_path, 'ACQ_TIME', '       854.8', value)
+        scan = Scan(path)
+        assert np.isnan(scan.header['acq_time'])
+        ref = Scan(scan_file)
+        np.testing.assert_array_equal(scan.signals['Z']['forward'],
+                                      ref.signals['Z']['forward'])
+        np.testing.assert_array_equal(scan.header['scan_pixels'], ref.header['scan_pixels'])
+
+    def test_rewrite_keeps_not_available(self, scan_file, tmp_path):
+        path = self._with_value(scan_file, tmp_path, 'ACQ_TIME', '       854.8', 'N/A')
+        out = tmp_path / 'rewritten.sxm'
+        Scan(path).write(str(out))
+        assert out.read_bytes() == open(path, 'rb').read()
+
+    def test_scan_time_not_available(self, scan_file, tmp_path):
+        old = '             1.664E+0             1.664E+0'
+        path = self._with_value(scan_file, tmp_path, 'SCAN_TIME', old, 'N/A N/A')
+        assert np.isnan(Scan(path).header['scan_time']).all()
+
+    def test_garbage_still_rejected(self, scan_file, tmp_path):
+        from nanonispy2.core.exceptions import InvalidHeaderValueError
+        path = self._with_value(scan_file, tmp_path, 'ACQ_TIME', '       854.8', 'soon')
+        with pytest.raises(InvalidHeaderValueError, match="acq_time"):
+            Scan(path)
