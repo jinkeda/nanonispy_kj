@@ -98,12 +98,16 @@ def parse_grid_header(
         header_dict['sweep_signal'] = raw_dict['Sweep Signal']
         raw_dict.pop('Sweep Signal')
 
-        # Fixed parameters
-        header_dict['fixed_parameters'] = raw_dict['Fixed parameters']
+        # Fixed parameters (a single entry has no ';' and parses as str)
+        fixed = raw_dict['Fixed parameters']
+        header_dict['fixed_parameters'] = [fixed] if isinstance(fixed, str) else fixed
         raw_dict.pop('Fixed parameters')
 
         # Experimental parameters
-        header_dict['experimental_parameters'] = raw_dict['Experiment parameters']
+        experimental = raw_dict['Experiment parameters']
+        header_dict['experimental_parameters'] = (
+            [experimental] if isinstance(experimental, str) else experimental
+        )
         raw_dict.pop('Experiment parameters')
 
         # Number of parameters (each 4 bytes)
@@ -172,8 +176,16 @@ def parse_scan_header(header_raw: str) -> Dict[str, Any]:
     -------
     dict
         Parsed header with appropriate type conversions.
+        ``scan_pixels`` is always ``[nx, ny]`` (samples per line, lines):
+        files with ``NANONIS_VERSION`` < 2 store it as ``ny nx`` and are
+        swapped here.
     """
-    header_entries = header_raw.split('\n')[:-3]
+    header_entries = header_raw.split('\n')
+    # Everything from the ':SCANIT_END:' line on is not header
+    for idx, entry in enumerate(header_entries):
+        if entry.strip() == ':SCANIT_END:':
+            header_entries = header_entries[:idx]
+            break
     header_dict = {}
 
     # Define entry types for processing
@@ -246,7 +258,69 @@ def parse_scan_header(header_raw: str) -> Dict[str, Any]:
         if key in header_dict:
             header_dict[key] = np.asarray(header_dict[key], dtype=np.int32)
 
+    # NANONIS_VERSION < 2 stores SCAN_PIXELS as 'ny nx'
+    if 'scan_pixels' in header_dict and _scan_version(header_dict) < 2:
+        header_dict['scan_pixels'] = header_dict['scan_pixels'][::-1].copy()
+
     return header_dict
+
+
+SCAN_DIRECTIONS = {
+    'both': ('forward', 'backward'),
+    'forward': ('forward',),
+    'backward': ('backward',),
+}
+
+
+def _scan_version(header_dict: Dict[str, Any]) -> int:
+    """Return NANONIS_VERSION as int (2 if absent or unparsable)."""
+    try:
+        return int(str(header_dict.get('nanonis_version', '2')).strip())
+    except ValueError:
+        return 2
+
+
+def scan_channel_layout(header: Dict[str, Any]) -> List[Tuple[str, Tuple[str, ...]]]:
+    """
+    Frame layout of the binary data block of a parsed .sxm header.
+
+    Channels are stored in DATA_INFO order. A ``both`` channel stores
+    its forward frame then its backward frame; a ``forward`` or
+    ``backward`` channel stores one frame.
+
+    Parameters
+    ----------
+    header : dict
+        Header as returned by :func:`parse_scan_header`.
+
+    Returns
+    -------
+    list of (str, tuple of str)
+        ``(channel name, recorded directions)`` in file order.
+
+    Raises
+    ------
+    InvalidHeaderValueError
+        If DATA_INFO is missing or a Direction value is not one of
+        'both', 'forward', 'backward'.
+    """
+    data_info = header.get('data_info')
+    if not data_info or 'Name' not in data_info:
+        raise InvalidHeaderValueError("Scan header has no usable DATA_INFO table.")
+    names = list(data_info['Name'])
+    # Files without a Direction column: assume both directions
+    directions = list(data_info.get('Direction', ('both',) * len(names)))
+
+    layout = []
+    for name, direction in zip(names, directions):
+        key = direction.strip().lower()
+        if key not in SCAN_DIRECTIONS:
+            raise InvalidHeaderValueError(
+                f"Channel '{name}' has unknown direction '{direction}'. "
+                f"Expected one of {sorted(SCAN_DIRECTIONS)}."
+            )
+        layout.append((name, SCAN_DIRECTIONS[key]))
+    return layout
 
 
 def parse_scan_header_table(table_list: List[str]) -> Dict[str, Tuple]:

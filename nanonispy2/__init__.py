@@ -6,6 +6,8 @@ Primary API
     Grid  : Read Nanonis grid spectroscopy (.3ds) files.
     Scan  : Read Nanonis scan (.sxm) files.
     Spec  : Read Nanonis point spectroscopy (.dat) files.
+    write_sxm, write_dat, write_3ds : Create files from scratch.
+    Scan.write, Spec.write, Grid.write : Write loaded files back.
 
 Example
 -------
@@ -21,5 +23,6 @@ Backward Compatibility
 """
 
 from .parsers import Grid, Scan, Spec
+from .writers import write_3ds, write_dat, write_sxm
 
-__all__ = ['Grid', 'Scan', 'Spec']
+__all__ = ['Grid', 'Scan', 'Spec', 'write_sxm', 'write_dat', 'write_3ds']

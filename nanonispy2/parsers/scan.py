@@ -12,7 +12,8 @@ import numpy as np
 from ..core.base import NanonisFile
 from ..core.exceptions import CorruptedDataError
 from ..io.formats import get_dtype
-from .header import parse_scan_header
+from ..writers.sxm import write_scan_file
+from .header import parse_scan_header, scan_channel_layout
 
 
 class Scan(NanonisFile):
@@ -26,11 +27,14 @@ class Scan(NanonisFile):
     attribute so as to not include this as a datapoint.
 
     Data is structured a little differently from grid files, obviously.
-    For each pixel in the scan, each channel is recorded forwards and
-    backwards one after the other.
+    Channels are stored in DATA_INFO order, one (ny, nx) frame per
+    recorded direction: a 'both' channel stores its forward frame then
+    its backward frame, a 'forward' or 'backward' channel one frame.
+    Arrays are returned in raw file order without flips (line 0 is the
+    first line acquired; backward lines run right to left).
 
-    Currently cannot take scans that do not have both directions
-    recorded for each channel, nor incomplete scans.
+    Incomplete (aborted) scans are read as long as the file has its full
+    size; unmeasured lines are NaN.
 
     Parameters
     ----------
@@ -46,8 +50,8 @@ class Scan(NanonisFile):
         otherwise most are string values.
     signals : dict
         Dict keys correspond to channel name, values correspond to
-        another dict whose keys are simply forward and backward arrays
-        for the scan image.
+        another dict whose keys are the recorded directions ('forward'
+        and/or 'backward') and whose values are the (ny, nx) arrays.
 
     Raises
     ------
@@ -76,20 +80,12 @@ class Scan(NanonisFile):
         dict
             Channel name keyed dict of each channel array.
         """
-        channs = list(self.header['data_info']['Name'])
-        nchanns = len(channs)
-        nx, ny = self.header['scan_pixels']
+        nx, ny = (int(v) for v in self.header['scan_pixels'])
 
-        # Determine number of scan directions from header
-        # The 'Direction' field in data_info contains per-channel values
-        # like 'both' (= forward + backward) or 'forward'/'backward'
-        data_info = self.header.get('data_info', {})
-        if 'Direction' in data_info:
-            directions = data_info['Direction']
-            # If any channel records 'both', there are 2 directions
-            ndir = 2 if any(d.strip().lower() == 'both' for d in directions) else 1
-        else:
-            ndir = 2  # default: forward + backward
+        # Frames per channel from the DATA_INFO 'Direction' column:
+        # 'both' = forward then backward frame, 'forward'/'backward' = one
+        layout = scan_channel_layout(self.header)
+        nframes = sum(len(dirs) for _, dirs in layout)
 
         data_dict = dict()
 
@@ -99,22 +95,75 @@ class Scan(NanonisFile):
             scandata = np.fromfile(f, dtype=self.data_format)
 
         # reshape
-        expected_size = nchanns * ndir * ny * nx
+        expected_size = nframes * ny * nx
         if scandata.size != expected_size:
             raise CorruptedDataError(
                 f"{self.basename}: expected {expected_size} data points "
-                f"({nchanns} channels × {ndir} directions × {ny} × {nx} pixels) "
+                f"({len(layout)} channels, {nframes} frames × {ny} × {nx} pixels) "
                 f"but found {scandata.size}. File may be truncated or corrupted."
             )
-        scandata_shaped = scandata.reshape(nchanns, ndir, ny, nx)
+        frames = scandata.reshape(nframes, ny, nx)
 
-        # extract data for each channel
-        for i, chann in enumerate(channs):
-            chann_dict = dict(forward=scandata_shaped[i, 0, :, :],
-                              backward=scandata_shaped[i, 1, :, :])
+        # extract data for each channel, exposing only recorded directions
+        k = 0
+        for chann, directions in layout:
+            chann_dict = dict()
+            for direction in directions:
+                chann_dict[direction] = frames[k]
+                k += 1
             data_dict[chann] = chann_dict
 
         return data_dict
+
+    def write(self, fname, signals=None, header_raw=None, overwrite=False,
+              encoding='utf-8'):
+        """
+        Write a Nanonis scan (sxm) file to disk.
+
+        With no arguments this reproduces the loaded file byte for byte.
+        Arrays are written in exactly the raw order :class:`Scan`
+        returns them, with no flips: line 0 is the first line acquired
+        (top of the frame for ``SCAN_DIR = down``, bottom for ``up``)
+        and backward lines are stored in acquisition order, i.e. right
+        to left. Data are always written as big-endian float32
+        (``FLOAT MSBFIRST``); NaN is written as-is.
+
+        Parameters
+        ----------
+        fname : str or path-like
+            Output file path. Must end with ``.sxm``.
+        signals : dict, optional
+            ``{channel: {direction: (ny, nx) array}}``. Defaults to
+            ``self.signals``. Each channel must have exactly the
+            directions its DATA_INFO row records.
+        header_raw : str or bytes, optional
+            Header text to write, starting with ``:NANONIS_VERSION:``.
+            Anything from ``:SCANIT_END:`` on is replaced by the standard
+            terminator. Defaults to the original header bytes.
+        overwrite : bool, optional
+            If False (default), raise ``FileExistsError`` when *fname*
+            already exists.
+        encoding : str, optional
+            Encoding used if *header_raw* is a str. Defaults to UTF-8.
+
+        Raises
+        ------
+        UnhandledFileError
+            If *fname* does not end with ``.sxm``.
+        FileExistsError
+            If *fname* exists and *overwrite* is False.
+        ValueError
+            If the header does not match the signal arrays (pixels,
+            channel names, directions), or declares little-endian data.
+        """
+        if header_raw is None:
+            header = self.header_bytes
+        elif isinstance(header_raw, bytes):
+            header = header_raw
+        else:
+            header = header_raw.encode(encoding)
+        signals_to_write = self.signals if signals is None else signals
+        write_scan_file(fname, header, signals_to_write, overwrite=overwrite)
 
 
 __all__ = ['Scan']

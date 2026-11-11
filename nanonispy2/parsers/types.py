@@ -6,7 +6,7 @@ Provides TypedDict classes for autocompletion and type checking of parsed header
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
 from typing_extensions import TypedDict
 
@@ -36,20 +36,31 @@ class GridHeader(TypedDict, total=False):
     comment: str
 
 
-class ScanHeader(TypedDict, total=False):
-    """Parsed header from a Nanonis .sxm scan file."""
-
-    scan_pixels: np.ndarray
-    scan_range: np.ndarray
-    scan_offset: np.ndarray
-    scan_time: np.ndarray
-    scan_angle: str
-    scan_dir: str
-    bias: np.float64
-    acq_time: np.float64
-    data_info: Dict[str, Any]
-    z_controller: Dict[str, Any]
-    comment: str
+# Functional syntax because the reader's keys include hyphens
+# ('z-controller', 'multipass-config'), which class syntax cannot express.
+# Keys are the lower-cased tag names; other ':Section>Key:' entries appear
+# as lower-cased string values, e.g. 'bias>bias (v)'.
+ScanHeader = TypedDict('ScanHeader', {
+    'nanonis_version': str,
+    'scanit_type': str,
+    'rec_date': str,
+    'rec_time': str,
+    'rec_temp': str,
+    'scan_file': str,
+    'scan_pixels': np.ndarray,     # [nx, ny], also for NANONIS_VERSION < 2
+    'scan_range': np.ndarray,
+    'scan_offset': np.ndarray,
+    'scan_time': np.ndarray,
+    'scan_angle': str,
+    'scan_dir': str,
+    'bias': np.float64,
+    'acq_time': np.float64,
+    'data_info': Dict[str, Any],
+    'z-controller': Dict[str, Any],
+    'multipass-config': Dict[str, Any],
+    'comment': str,
+}, total=False)
+ScanHeader.__doc__ = "Parsed header from a Nanonis .sxm scan file."
 
 
 class SpecHeader(TypedDict, total=False):

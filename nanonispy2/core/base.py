@@ -47,6 +47,8 @@ class NanonisFile:
         Size of header in bytes (position where data begins).
     header_raw : str
         Unprocessed header information as a string.
+    header_bytes : bytes
+        The same header as undecoded bytes (used by the writers).
 
     Raises
     ------
@@ -178,7 +180,9 @@ class NanonisFile:
         """
         with open(self.fname, 'rb') as f:
             header_bytes = f.read(self.byte_offset)
-            return header_bytes.decode('utf-8', errors='replace')
+        # Undecoded copy, so writers can reproduce the header byte for byte
+        self.header_bytes = header_bytes
+        return header_bytes.decode('utf-8', errors='replace')
 
     def __repr__(self) -> str:
         """
